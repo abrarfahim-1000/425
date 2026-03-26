@@ -30,8 +30,8 @@ def train_ae():
         return
         
     print("Loading data...")
-    x_train = np.load(train_path).astype(np.float32)
-    x_val = np.load(val_path).astype(np.float32)
+    x_train = np.load(train_path)
+    x_val = np.load(val_path)
 
     if x_train.size == 0 or x_val.size == 0:
         print(
@@ -79,7 +79,7 @@ def train_ae():
         total_train_loss = 0
         
         for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{AE_CONFIG['epochs']} [Train]"):
-            x = batch[0].to(DEVICE)
+            x = batch[0].to(DEVICE, dtype=torch.float32)
             
             optimizer.zero_grad()
             x_hat = model(x)
@@ -97,7 +97,7 @@ def train_ae():
         total_val_loss = 0
         with torch.no_grad():
             for batch in tqdm(val_loader, desc=f"Epoch {epoch+1}/{AE_CONFIG['epochs']} [Val]"):
-                x = batch[0].to(DEVICE)
+                x = batch[0].to(DEVICE, dtype=torch.float32)
                 x_hat = model(x)
                 loss = criterion(x_hat, x)
                 total_val_loss += loss.item()

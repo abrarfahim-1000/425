@@ -80,7 +80,7 @@ def generate_markov_music(transitions, num_steps=64, num_samples=5):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model", choices=["baseline_random", "baseline_markov", "ae"], default="baseline_random")
+    parser.add_argument("--model", choices=["baseline_random", "baseline_markov", "ae", "vae"], default="baseline_random")
     parser.add_argument("--num_samples", type=int, default=5)
     args = parser.parse_args()
 
@@ -92,3 +92,6 @@ if __name__ == "__main__":
     elif args.model == "ae":
         from src.generation.sample_latent import sample_ae
         sample_ae(num_samples=args.num_samples)
+    elif args.model == "vae":
+        from src.generation.sample_latent import sample_vae
+        sample_vae(num_samples=args.num_samples)

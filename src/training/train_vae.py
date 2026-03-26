@@ -1,0 +1,326 @@
+import argparse
+from pathlib import Path
+import sys
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
+from tqdm import tqdm
+import matplotlib.pyplot as plt
+
+# Add src to path
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
+
+from src.config import (
+    PROCESSED_DATA_DIR,
+    CHECKPOINT_DIR,
+    PLOTS_DIR,
+    GENERATED_MIDI_DIR,
+    DEVICE,
+    VAE_CONFIG,
+    FS,
+)
+from src.models.vae import MusicVAE
+from src.preprocessing.piano_roll import piano_roll_to_pretty_midi
+
+
+def kl_divergence(mu: torch.Tensor, log_var: torch.Tensor) -> torch.Tensor:
+    """
+    KL divergence between N(mu, sigma^2) and N(0, 1).
+
+    Returns a scalar mean over batch.
+    """
+
+    # -0.5 * sum(1 + log(sigma^2) - mu^2 - sigma^2)
+    kl_per_sample = -0.5 * torch.sum(
+        1.0 + log_var - mu.pow(2) - log_var.exp(),
+        dim=1,
+    )
+    return kl_per_sample.mean()
+
+
+def load_genre_splits(genres: list[str], split: str) -> dict[str, np.ndarray]:
+    """
+    Loads {genre}_{split}.npy if present from processed data.
+    Returns dict: genre -> array of shape (N, seq_len, 128).
+    """
+
+    out: dict[str, np.ndarray] = {}
+    for g in genres:
+        path = PROCESSED_DATA_DIR / f"{g}_{split}.npy"
+        if not path.exists():
+            print(f"[VAE] Missing {path}, skipping genre '{g}'.")
+            continue
+        # Keep stored dtype (typically uint8) to avoid large RAM spikes.
+        # We'll cast to float32 per-batch during training.
+        arr = np.load(path)
+        if arr.size == 0:
+            print(f"[VAE] Empty array in {path}, skipping genre '{g}'.")
+            continue
+        out[g] = arr
+        print(f"[VAE] Loaded {g}_{split}.npy with shape {arr.shape}")
+    return out
+
+
+def concat_splits(split_by_genre: dict[str, np.ndarray]) -> np.ndarray:
+    if not split_by_genre:
+        raise RuntimeError("No genre splits were loaded. Check processed data files.")
+    arrays = [split_by_genre[g] for g in sorted(split_by_genre.keys())]
+    if len(arrays) == 1:
+        # Avoid copying the whole array for the common single-genre smoke test.
+        return arrays[0]
+    return np.concatenate(arrays, axis=0)
+
+
+def generate_vae_midi_samples(
+    model: MusicVAE,
+    device: str,
+    genre_train_by_name: dict[str, np.ndarray],
+    num_samples: int = 8,
+    output_prefix: str = "task2_sample",
+):
+    """
+    Generates MIDI samples by encoding random sequences per-genre,
+    sampling z from the approximate posterior, and decoding.
+    """
+
+    if not genre_train_by_name:
+        raise RuntimeError("genre_train_by_name is empty; cannot generate samples.")
+
+    model.eval()
+    available_genres = list(genre_train_by_name.keys())
+
+    # Ensure we actually get `num_samples` outputs even if there's 1 genre.
+    samples: list[tuple[str, torch.Tensor]] = []
+    for i in range(num_samples):
+        genre = available_genres[i % len(available_genres)]
+        arr = genre_train_by_name[genre]
+        idx = np.random.randint(0, arr.shape[0])
+        x = torch.from_numpy(arr[idx]).unsqueeze(0).to(device, dtype=torch.float32)  # (1, seq_len, 128)
+        with torch.no_grad():
+            mu, log_var = model.encode(x)
+            z = model.reparameterize(mu, log_var)  # (1, latent_dim)
+        samples.append((genre, z))
+
+    with torch.no_grad():
+        for i, (_, z) in enumerate(samples):
+            x_hat = model.decode(z)  # (1, seq_len, 128)
+            roll = x_hat.squeeze(0).cpu().numpy().T  # (128, seq_len)
+            pm = piano_roll_to_pretty_midi(roll, fs=FS)
+            output_path = GENERATED_MIDI_DIR / f"{output_prefix}_{i}.mid"
+            pm.write(str(output_path))
+            print(f"[VAE] Saved {output_path}")
+
+
+def generate_vae_interpolation(model: MusicVAE, device: str, num_steps: int = 8, output_prefix: str = "task2_interp"):
+    model.eval()
+    latent_dim = VAE_CONFIG["latent_dim"]
+
+    z1 = torch.randn(1, latent_dim).to(device)
+    z2 = torch.randn(1, latent_dim).to(device)
+
+    with torch.no_grad():
+        for i, alpha in enumerate(np.linspace(0.0, 1.0, num_steps)):
+            z = (1.0 - alpha) * z1 + alpha * z2
+            x_hat = model.decode(z)
+            roll = x_hat.squeeze(0).cpu().numpy().T
+            pm = piano_roll_to_pretty_midi(roll, fs=FS)
+            output_path = GENERATED_MIDI_DIR / f"{output_prefix}_{i}.mid"
+            pm.write(str(output_path))
+            print(f"[VAE] Saved {output_path}")
+
+
+def train_vae(
+    epochs: int,
+    beta: float,
+    batch_size: int,
+    lr: float,
+    genres: list[str],
+    generate_after_train: bool,
+    num_samples: int,
+    train_max_batches: int | None = None,
+    val_max_batches: int | None = None,
+):
+    print(f"Using device: {DEVICE}")
+
+    train_by_genre = load_genre_splits(genres, split="train")
+    val_by_genre = load_genre_splits(genres, split="validation")
+
+    x_train = concat_splits(train_by_genre)
+    x_val = concat_splits(val_by_genre)
+
+    train_ds = TensorDataset(torch.from_numpy(x_train))
+    val_ds = TensorDataset(torch.from_numpy(x_val))
+
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(val_ds, batch_size=batch_size)
+
+    model = MusicVAE(
+        input_size=128,
+        hidden_size=VAE_CONFIG["hidden_size"],
+        latent_dim=VAE_CONFIG["latent_dim"],
+        seq_len=VAE_CONFIG["seq_len"],
+    ).to(DEVICE)
+
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    recon_criterion = nn.MSELoss()
+
+    train_total_losses: list[float] = []
+    val_total_losses: list[float] = []
+    train_recon_losses: list[float] = []
+    val_recon_losses: list[float] = []
+    train_kl_losses: list[float] = []
+    val_kl_losses: list[float] = []
+
+    best_val_total = float("inf")
+
+    print(f"[VAE] Starting training for {epochs} epochs on genres={genres}")
+    for epoch in range(epochs):
+        model.train()
+        total_train = 0.0
+        total_train_recon = 0.0
+        total_train_kl = 0.0
+        train_batches_used = 0
+
+        for batch_idx, batch in enumerate(tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs} [Train]")):
+            x = batch[0].to(DEVICE, dtype=torch.float32)
+
+            if train_max_batches is not None and batch_idx >= train_max_batches:
+                break
+
+            optimizer.zero_grad()
+            x_hat, mu, log_var = model(x)
+
+            recon_loss = recon_criterion(x_hat, x)
+            kl_loss = kl_divergence(mu, log_var)
+            loss = recon_loss + beta * kl_loss
+
+            loss.backward()
+            optimizer.step()
+
+            total_train += loss.item()
+            total_train_recon += recon_loss.item()
+            total_train_kl += kl_loss.item()
+            train_batches_used += 1
+
+        avg_train_total = total_train / max(1, train_batches_used)
+        avg_train_recon = total_train_recon / max(1, train_batches_used)
+        avg_train_kl = total_train_kl / max(1, train_batches_used)
+
+        model.eval()
+        total_val = 0.0
+        total_val_recon = 0.0
+        total_val_kl = 0.0
+        val_batches_used = 0
+
+        with torch.no_grad():
+            for batch_idx, batch in enumerate(tqdm(val_loader, desc=f"Epoch {epoch+1}/{epochs} [Val]")):
+                x = batch[0].to(DEVICE, dtype=torch.float32)
+                if val_max_batches is not None and batch_idx >= val_max_batches:
+                    break
+                x_hat, mu, log_var = model(x)
+                recon_loss = recon_criterion(x_hat, x)
+                kl_loss = kl_divergence(mu, log_var)
+                loss = recon_loss + beta * kl_loss
+
+                total_val += loss.item()
+                total_val_recon += recon_loss.item()
+                total_val_kl += kl_loss.item()
+                val_batches_used += 1
+
+            avg_val_total = total_val / max(1, val_batches_used)
+            avg_val_recon = total_val_recon / max(1, val_batches_used)
+            avg_val_kl = total_val_kl / max(1, val_batches_used)
+
+        print(
+            f"[VAE] Epoch {epoch+1}: "
+            f"train_total={avg_train_total:.6f}, train_recon={avg_train_recon:.6f}, train_kl={avg_train_kl:.6f} | "
+            f"val_total={avg_val_total:.6f}, val_recon={avg_val_recon:.6f}, val_kl={avg_val_kl:.6f}"
+        )
+
+        train_total_losses.append(avg_train_total)
+        val_total_losses.append(avg_val_total)
+        train_recon_losses.append(avg_train_recon)
+        val_recon_losses.append(avg_val_recon)
+        train_kl_losses.append(avg_train_kl)
+        val_kl_losses.append(avg_val_kl)
+
+        if avg_val_total < best_val_total:
+            best_val_total = avg_val_total
+            torch.save(model.state_dict(), CHECKPOINT_DIR / "best_vae.pt")
+            print("[VAE] Saved best_vae.pt")
+
+    # Plot losses
+    plt.figure(figsize=(12, 6))
+    plt.plot(train_total_losses, label="Train Total")
+    plt.plot(val_total_losses, label="Val Total")
+    plt.plot(train_recon_losses, label="Train Recon", alpha=0.7)
+    plt.plot(val_recon_losses, label="Val Recon", alpha=0.7)
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.title("Task 2: VAE Loss Curves")
+    plot_path = PLOTS_DIR / "task2_vae_loss.png"
+    plt.savefig(plot_path)
+    plt.close()
+    print(f"[VAE] Loss curve saved to {plot_path}")
+
+    if not generate_after_train:
+        return
+
+    # Load best checkpoint for generation
+    best_path = CHECKPOINT_DIR / "best_vae.pt"
+    if not best_path.exists():
+        print(f"[VAE] Best checkpoint not found at {best_path}, skipping generation.")
+        return
+
+    model.load_state_dict(torch.load(best_path, map_location=DEVICE))
+
+    # Generate Task 2 samples + interpolation
+    generate_vae_midi_samples(
+        model=model,
+        device=DEVICE,
+        genre_train_by_name=train_by_genre,
+        num_samples=num_samples,
+        output_prefix="task2_sample",
+    )
+
+    generate_vae_interpolation(
+        model=model,
+        device=DEVICE,
+        num_steps=8,
+        output_prefix="task2_interp",
+    )
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--epochs", type=int, default=VAE_CONFIG["epochs"])
+    parser.add_argument("--beta", type=float, default=VAE_CONFIG["beta"])
+    parser.add_argument("--batch_size", type=int, default=VAE_CONFIG["batch_size"])
+    parser.add_argument("--lr", type=float, default=VAE_CONFIG["lr"])
+    parser.add_argument("--genres", type=str, default="maestro", help="Comma-separated list (e.g., maestro,lakh,groove)")
+    parser.add_argument("--no_generate", action="store_true", help="Skip MIDI generation after training.")
+    parser.add_argument("--num_samples", type=int, default=8)
+    parser.add_argument("--train_max_batches", type=int, default=None, help="Smoke test: cap number of train batches.")
+    parser.add_argument("--val_max_batches", type=int, default=None, help="Smoke test: cap number of val batches.")
+    args = parser.parse_args()
+
+    genres = [g.strip() for g in args.genres.split(",") if g.strip()]
+    if not genres:
+        genres = ["maestro"]
+
+    train_vae(
+        epochs=args.epochs,
+        beta=args.beta,
+        batch_size=args.batch_size,
+        lr=args.lr,
+        genres=genres,
+        generate_after_train=not args.no_generate,
+        num_samples=args.num_samples,
+        train_max_batches=args.train_max_batches,
+        val_max_batches=args.val_max_batches,
+    )
+

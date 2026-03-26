@@ -32,6 +32,8 @@ def rhythm_diversity(pm: pretty_midi.PrettyMIDI) -> float:
     """
     durations = []
     for instrument in pm.instruments:
+        if instrument.is_drum:
+            continue
         for note in instrument.notes:
             durations.append(round(note.end - note.start, 3))
             
@@ -49,6 +51,8 @@ def repetition_ratio(pm: pretty_midi.PrettyMIDI, n=4) -> float:
     """
     pitches = []
     for instrument in pm.instruments:
+        if instrument.is_drum:
+            continue
         for note in instrument.notes:
             pitches.append(note.pitch)
             
