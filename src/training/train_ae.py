@@ -82,7 +82,11 @@ def train_ae():
             x = batch[0].to(DEVICE, dtype=torch.float32)
             
             optimizer.zero_grad()
-            x_hat = model(x)
+
+            # Algorithm 1 (Task 1): z = f_phi(X), X_hat = g_theta(z)
+            z = model.encode(x)
+            x_hat = model.decode(z)
+
             loss = criterion(x_hat, x)
             loss.backward()
             optimizer.step()
@@ -98,7 +102,8 @@ def train_ae():
         with torch.no_grad():
             for batch in tqdm(val_loader, desc=f"Epoch {epoch+1}/{AE_CONFIG['epochs']} [Val]"):
                 x = batch[0].to(DEVICE, dtype=torch.float32)
-                x_hat = model(x)
+                z = model.encode(x)
+                x_hat = model.decode(z)
                 loss = criterion(x_hat, x)
                 total_val_loss += loss.item()
                 

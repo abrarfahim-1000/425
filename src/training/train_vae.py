@@ -77,35 +77,18 @@ def concat_splits(split_by_genre: dict[str, np.ndarray]) -> np.ndarray:
 def generate_vae_midi_samples(
     model: MusicVAE,
     device: str,
-    genre_train_by_name: dict[str, np.ndarray],
     num_samples: int = 8,
     output_prefix: str = "task2_sample",
 ):
     """
-    Generates MIDI samples by encoding random sequences per-genre,
-    sampling z from the approximate posterior, and decoding.
+    Generates MIDI samples by sampling z ~ N(0, I) and decoding.
     """
-
-    if not genre_train_by_name:
-        raise RuntimeError("genre_train_by_name is empty; cannot generate samples.")
-
     model.eval()
-    available_genres = list(genre_train_by_name.keys())
-
-    # Ensure we actually get `num_samples` outputs even if there's 1 genre.
-    samples: list[tuple[str, torch.Tensor]] = []
-    for i in range(num_samples):
-        genre = available_genres[i % len(available_genres)]
-        arr = genre_train_by_name[genre]
-        idx = np.random.randint(0, arr.shape[0])
-        x = torch.from_numpy(arr[idx]).unsqueeze(0).to(device, dtype=torch.float32)  # (1, seq_len, 128)
-        with torch.no_grad():
-            mu, log_var = model.encode(x)
-            z = model.reparameterize(mu, log_var)  # (1, latent_dim)
-        samples.append((genre, z))
+    latent_dim = VAE_CONFIG["latent_dim"]
 
     with torch.no_grad():
-        for i, (_, z) in enumerate(samples):
+        for i in range(num_samples):
+            z = torch.randn(1, latent_dim).to(device)
             x_hat = model.decode(z)  # (1, seq_len, 128)
             roll = x_hat.squeeze(0).cpu().numpy().T  # (128, seq_len)
             pm = piano_roll_to_pretty_midi(roll, fs=FS)
@@ -191,7 +174,11 @@ def train_vae(
                 break
 
             optimizer.zero_grad()
-            x_hat, mu, log_var = model(x)
+
+            # Algorithm 2 (Task 2): (mu, log_var) -> z -> X_hat
+            mu, log_var = model.encode(x)
+            z = model.reparameterize(mu, log_var)
+            x_hat = model.decode(z)
 
             recon_loss = recon_criterion(x_hat, x)
             kl_loss = kl_divergence(mu, log_var)
@@ -220,7 +207,11 @@ def train_vae(
                 x = batch[0].to(DEVICE, dtype=torch.float32)
                 if val_max_batches is not None and batch_idx >= val_max_batches:
                     break
-                x_hat, mu, log_var = model(x)
+
+                mu, log_var = model.encode(x)
+                z = model.reparameterize(mu, log_var)
+                x_hat = model.decode(z)
+
                 recon_loss = recon_criterion(x_hat, x)
                 kl_loss = kl_divergence(mu, log_var)
                 loss = recon_loss + beta * kl_loss
@@ -282,7 +273,6 @@ def train_vae(
     generate_vae_midi_samples(
         model=model,
         device=DEVICE,
-        genre_train_by_name=train_by_genre,
         num_samples=num_samples,
         output_prefix="task2_sample",
     )

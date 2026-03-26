@@ -27,20 +27,17 @@ class LSTMDecoder(nn.Module):
         
     def forward(self, z):
         # z: (batch, latent_dim)
-        # Reconstruct sequence step by step or all at once?
-        # A simple way: repeat z as input to LSTM at each time step
         batch_size = z.size(0)
-        
-        # Initial hidden/cell state from z?
-        # h_0 = self.latent_to_hidden(z).unsqueeze(0) # (1, batch, hidden_size)
-        # c_0 = torch.zeros_like(h_0)
-        
-        # Or just use z as input at each step
+
+        # Condition both decoder inputs and initial hidden state on z.
+        h_0 = self.latent_to_hidden(z).unsqueeze(0)  # (1, batch, hidden_size)
+        c_0 = torch.zeros_like(h_0)
+
         z_input = z.unsqueeze(1).repeat(1, self.seq_len, 1) # (batch, seq_len, latent_dim)
-        
-        lstm_out, _ = self.lstm(z_input)
+
+        lstm_out, _ = self.lstm(z_input, (h_0, c_0))
         # lstm_out: (batch, seq_len, hidden_size)
-        
+
         out = self.output_layer(lstm_out)
         return self.sigmoid(out)
 
@@ -49,8 +46,14 @@ class MusicAutoencoder(nn.Module):
         super(MusicAutoencoder, self).__init__()
         self.encoder = LSTMEncoder(input_size, hidden_size, latent_dim)
         self.decoder = LSTMDecoder(latent_dim, hidden_size, input_size, seq_len)
+
+    def encode(self, x):
+        return self.encoder(x)
+
+    def decode(self, z):
+        return self.decoder(z)
         
     def forward(self, x):
-        z = self.encoder(x)
-        x_hat = self.decoder(z)
+        z = self.encode(x)
+        x_hat = self.decode(z)
         return x_hat
