@@ -25,10 +25,20 @@ def train_ae():
     if not train_path.exists():
         print(f"Training data not found at {train_path}")
         return
+    if not val_path.exists():
+        print(f"Validation data not found at {val_path}")
+        return
         
     print("Loading data...")
     x_train = np.load(train_path).astype(np.float32)
     x_val = np.load(val_path).astype(np.float32)
+
+    if x_train.size == 0 or x_val.size == 0:
+        print(
+            "Processed data is empty. Re-run preprocessing and verify "
+            f"{train_path} and {val_path} contain segments."
+        )
+        return
     
     # Create datasets
     train_ds = TensorDataset(torch.from_numpy(x_train))
@@ -37,6 +47,13 @@ def train_ae():
     # Dataloaders
     train_loader = DataLoader(train_ds, batch_size=AE_CONFIG['batch_size'], shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=AE_CONFIG['batch_size'])
+
+    if len(train_loader) == 0 or len(val_loader) == 0:
+        print(
+            "No training/validation batches available. Check processed split sizes "
+            "and batch size configuration."
+        )
+        return
     
     # Model
     model = MusicAutoencoder(
@@ -109,6 +126,7 @@ def train_ae():
     plt.legend()
     plt.title('Task 1: LSTM Autoencoder Training Loss')
     plt.savefig(PLOTS_DIR / "task1_loss.png")
+    plt.close()
     print(f"Loss curve saved to {PLOTS_DIR / 'task1_loss.png'}")
 
 if __name__ == "__main__":

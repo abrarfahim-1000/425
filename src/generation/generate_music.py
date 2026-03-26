@@ -1,13 +1,12 @@
 import numpy as np
-import os
 from pathlib import Path
 import sys
-import pretty_midi
+import argparse
 
 # Add src to path
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
-from src.config import GENERATED_MIDI_DIR, PROCESSED_DATA_DIR, FS, SEQ_LEN
+from src.config import GENERATED_MIDI_DIR, PROCESSED_DATA_DIR, FS
 from src.preprocessing.piano_roll import piano_roll_to_pretty_midi
 
 def generate_random_music(num_steps=64, num_samples=5):
@@ -80,6 +79,16 @@ def generate_markov_music(transitions, num_steps=64, num_samples=5):
         print(f"Saved {output_path}")
 
 if __name__ == "__main__":
-    generate_random_music()
-    transitions = train_markov_chain()
-    generate_markov_music(transitions)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", choices=["baseline_random", "baseline_markov", "ae"], default="baseline_random")
+    parser.add_argument("--num_samples", type=int, default=5)
+    args = parser.parse_args()
+
+    if args.model == "baseline_random":
+        generate_random_music(num_samples=args.num_samples)
+    elif args.model == "baseline_markov":
+        transitions = train_markov_chain()
+        generate_markov_music(transitions, num_samples=args.num_samples)
+    elif args.model == "ae":
+        from src.generation.sample_latent import sample_ae
+        sample_ae(num_samples=args.num_samples)
