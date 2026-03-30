@@ -4,7 +4,6 @@ import sys
 
 import torch
 import numpy as np
-import pretty_midi
 
 # Add src to path
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))

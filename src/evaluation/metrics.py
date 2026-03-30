@@ -1,74 +1,15 @@
-import numpy as np
 import pretty_midi
-from typing import List
+from pathlib import Path
+import sys
 
-def get_pitch_histogram(pm: pretty_midi.PrettyMIDI) -> np.ndarray:
-    """Returns a 12-dim pitch histogram (C, C#, ..., B) normalized to sum to 1."""
-    histogram = np.zeros(12)
-    for instrument in pm.instruments:
-        if not instrument.is_drum:
-            for note in instrument.notes:
-                histogram[note.pitch % 12] += 1
-    if np.sum(histogram) > 0:
-        histogram /= np.sum(histogram)
-    return histogram
+import pandas as pd
 
-def pitch_histogram_similarity(gen_midi: pretty_midi.PrettyMIDI, ref_midi: pretty_midi.PrettyMIDI) -> float:
-    """
-    Computes similarity between two pitch histograms using 1 - Manhattan distance.
-    H(p,q) = sum_i |p_i - q_i|
-    Similarity = 1 - 0.5 * sum_i |p_i - q_i| (normalized to [0, 1])
-    """
-    p = get_pitch_histogram(gen_midi)
-    q = get_pitch_histogram(ref_midi)
-    
-    distance = np.sum(np.abs(p - q))
-    similarity = 1 - 0.5 * distance
-    return max(0.0, similarity)
+# Add src to path when run as a script.
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
-def rhythm_diversity(pm: pretty_midi.PrettyMIDI) -> float:
-    """
-    D = #unique_durations / #total_notes
-    """
-    durations = []
-    for instrument in pm.instruments:
-        if instrument.is_drum:
-            continue
-        for note in instrument.notes:
-            durations.append(round(note.end - note.start, 3))
-            
-    if not durations:
-        return 0.0
-        
-    unique_durations = len(set(durations))
-    diversity = unique_durations / len(durations)
-    return diversity
-
-def repetition_ratio(pm: pretty_midi.PrettyMIDI, n=4) -> float:
-    """
-    R = #repeated_patterns / #total_patterns
-    Simplistic: count repeated sequences of pitches.
-    """
-    pitches = []
-    for instrument in pm.instruments:
-        if instrument.is_drum:
-            continue
-        for note in instrument.notes:
-            pitches.append(note.pitch)
-            
-    if len(pitches) < n * 2:
-        return 0.0
-        
-    patterns = []
-    for i in range(len(pitches) - n + 1):
-        patterns.append(tuple(pitches[i:i+n]))
-        
-    if not patterns:
-        return 0.0
-        
-    unique_patterns = len(set(patterns))
-    ratio = (len(patterns) - unique_patterns) / len(patterns)
-    return ratio
+from src.config import GENERATED_MIDI_DIR, MAESTRO_CSV, MAESTRO_DIR
+from src.evaluation.pitch_histogram import get_pitch_histogram, pitch_histogram_similarity
+from src.evaluation.rhythm_score import rhythm_diversity, repetition_ratio
 
 def compute_all_metrics(gen_midi_path, ref_midi_path=None):
     gen_pm = pretty_midi.PrettyMIDI(gen_midi_path)
@@ -83,3 +24,40 @@ def compute_all_metrics(gen_midi_path, ref_midi_path=None):
         metrics["pitch_histogram_similarity"] = pitch_histogram_similarity(gen_pm, ref_pm)
         
     return metrics
+
+
+def evaluate_generated_midis(output_csv: Path | None = None):
+    """
+    Evaluates all .mid files in outputs/generated_midis and writes a CSV report.
+    """
+
+    df = pd.read_csv(MAESTRO_CSV)
+    train_df = df[df["split"] == "train"]
+    ref_file = MAESTRO_DIR / train_df.iloc[0]["midi_filename"]
+    print(f"Using reference file: {ref_file}")
+
+    results = []
+    for midi_path in sorted(GENERATED_MIDI_DIR.glob("*.mid")):
+        filename = midi_path.name
+        print(f"Evaluating {filename}...")
+        metrics = compute_all_metrics(str(midi_path), str(ref_file))
+        metrics["filename"] = filename
+        results.append(metrics)
+
+    if not results:
+        print("No MIDI files found for evaluation.")
+        return None
+
+    results_df = pd.DataFrame(results)
+    print("\nEvaluation Results:")
+    print(results_df.to_string())
+
+    if output_csv is None:
+        output_csv = GENERATED_MIDI_DIR / "evaluation_results.csv"
+    results_df.to_csv(output_csv, index=False)
+    print(f"\nSaved results to {output_csv}")
+    return results_df
+
+
+if __name__ == "__main__":
+    evaluate_generated_midis()

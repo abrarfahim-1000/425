@@ -3,7 +3,7 @@ import torch.nn as nn
 
 class LSTMEncoder(nn.Module):
     def __init__(self, input_size=128, hidden_size=256, latent_dim=128):
-        super(LSTMEncoder, self).__init__()
+        super().__init__()
         self.lstm = nn.LSTM(input_size, hidden_size, batch_first=True)
         self.latent_layer = nn.Linear(hidden_size, latent_dim)
         
@@ -17,7 +17,7 @@ class LSTMEncoder(nn.Module):
 
 class LSTMDecoder(nn.Module):
     def __init__(self, latent_dim=128, hidden_size=256, output_size=128, seq_len=64):
-        super(LSTMDecoder, self).__init__()
+        super().__init__()
         self.seq_len = seq_len
         self.hidden_size = hidden_size
         self.latent_to_hidden = nn.Linear(latent_dim, hidden_size)
@@ -43,7 +43,7 @@ class LSTMDecoder(nn.Module):
 
 class MusicAutoencoder(nn.Module):
     def __init__(self, input_size=128, hidden_size=256, latent_dim=128, seq_len=64):
-        super(MusicAutoencoder, self).__init__()
+        super().__init__()
         self.encoder = LSTMEncoder(input_size, hidden_size, latent_dim)
         self.decoder = LSTMDecoder(latent_dim, hidden_size, input_size, seq_len)
 

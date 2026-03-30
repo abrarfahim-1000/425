@@ -1,43 +1,29 @@
 import numpy as np
 import pretty_midi
-from typing import List
 
 def midi_to_piano_roll(midi: pretty_midi.PrettyMIDI, fs: int = 16) -> np.ndarray:
     """
-    Converts a PrettyMIDI object to a piano roll.
-    
+    Converts a PrettyMIDI object to a binarized piano roll of shape (128, T).
+
     Args:
         midi (pretty_midi.PrettyMIDI): Parsed MIDI object.
         fs (int): Sampling frequency (steps per bar/second). Default is 16.
-        
-    Returns:
-        np.ndarray: Piano roll representation of shape (128, T).
     """
-    # The piano roll is a binary matrix (0/1) for presence/absence of note
-    # get_piano_roll returns velocities, we'll binarize it for simplicity in Task 1/2
-    piano_roll = midi.get_piano_roll(fs=fs)
-    # Binarize: if velocity > 0, set to 1.0
-    piano_roll = (piano_roll > 0).astype(np.float32)
-    return piano_roll
+    return (midi.get_piano_roll(fs=fs) > 0).astype(np.float32)
 
-def segment_piano_roll(roll: np.ndarray, window: int = 64) -> List[np.ndarray]:
+def segment_piano_roll(roll: np.ndarray, window: int = 64) -> list[np.ndarray]:
     """
     Segments a piano roll into fixed-length windows.
-    
+
     Args:
         roll (np.ndarray): Piano roll of shape (128, T).
         window (int): Segment length in steps.
-        
+
     Returns:
-        List[np.ndarray]: List of segmented piano rolls of shape (128, window).
+        list[np.ndarray]: List of segments of shape (128, window).
     """
-    segments = []
-    # roll shape is (128, T), we need (T, 128) often for RNNs but here we follow (128, T)
     T = roll.shape[1]
-    for i in range(0, T - window + 1, window):
-        segment = roll[:, i:i+window]
-        segments.append(segment)
-    return segments
+    return [roll[:, i:i + window] for i in range(0, T - window + 1, window)]
 
 def piano_roll_to_pretty_midi(roll: np.ndarray, fs: int = 16, program: int = 0) -> pretty_midi.PrettyMIDI:
     """
