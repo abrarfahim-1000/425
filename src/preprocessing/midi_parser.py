@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 import sys
 
 import numpy as np
@@ -15,7 +14,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from src.config import FS, MAESTRO_CSV, MAESTRO_DIR, PROCESSED_DATA_DIR, SEQ_LEN
 from src.preprocessing.piano_roll import midi_to_piano_roll, segment_piano_roll
 
-def load_midi(filepath: str) -> Optional[pretty_midi.PrettyMIDI]:
+def load_midi(filepath: str) -> pretty_midi.PrettyMIDI | None:
     """
     Loads a MIDI file and returns a pretty_midi.PrettyMIDI object.
     

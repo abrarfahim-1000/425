@@ -26,21 +26,32 @@ def compute_all_metrics(gen_midi_path, ref_midi_path=None):
     return metrics
 
 
-def evaluate_generated_midis(output_csv: Path | None = None):
+def evaluate_generated_midis(output_csv: Path | None = None, ref_file: str | Path | None = None):
     """
     Evaluates all .mid files in outputs/generated_midis and writes a CSV report.
+
+    Args:
+        output_csv: Destination CSV path. Defaults to outputs/generated_midis/evaluation_results.csv.
+        ref_file:   Reference MIDI for pitch histogram similarity. If None, falls back
+                    to the first MAESTRO training file when the CSV is available.
+                    Pass an explicit path for Task 2 / Task 3 evaluations that use
+                    non-MAESTRO reference material.
     """
 
-    df = pd.read_csv(MAESTRO_CSV)
-    train_df = df[df["split"] == "train"]
-    ref_file = MAESTRO_DIR / train_df.iloc[0]["midi_filename"]
-    print(f"Using reference file: {ref_file}")
+    if ref_file is None:
+        if MAESTRO_CSV.exists():
+            df = pd.read_csv(MAESTRO_CSV)
+            train_df = df[df["split"] == "train"]
+            ref_file = MAESTRO_DIR / train_df.iloc[0]["midi_filename"]
+            print(f"Using reference file: {ref_file}")
+        else:
+            print("[metrics] No ref_file provided and MAESTRO CSV not found. Skipping pitch similarity.")
 
     results = []
     for midi_path in sorted(GENERATED_MIDI_DIR.glob("*.mid")):
         filename = midi_path.name
         print(f"Evaluating {filename}...")
-        metrics = compute_all_metrics(str(midi_path), str(ref_file))
+        metrics = compute_all_metrics(str(midi_path), str(ref_file) if ref_file else None)
         metrics["filename"] = filename
         results.append(metrics)
 

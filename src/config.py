@@ -71,6 +71,22 @@ TRANSFORMER_CONFIG = {
     "lr": 1e-4
 }
 
+# Task 4: RLHF Hyperparameters
+RLHF_CONFIG = {
+    "rl_steps": 30,
+    "episodes_per_step": 8,
+    "max_new_tokens": 256,
+    "lr": 5e-6,
+    "temperature": 1.0,
+    "top_k": 10,
+    "num_eval_samples": 10,
+    "reward_weights": {
+        "pitch": 0.4,
+        "rhythm": 0.4,
+        "anti_repetition": 0.2,
+    },
+}
+
 # General Training
 SEED = 42
 TRAIN_VAL_TEST_SPLIT = (0.8, 0.1, 0.1)

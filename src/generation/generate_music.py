@@ -23,50 +23,60 @@ def generate_random_music(num_steps=64, num_samples=5):
         pm.write(str(output_path))
         print(f"Saved {output_path}")
 
-def train_markov_chain():
-    train_data_path = PROCESSED_DATA_DIR / "maestro_train.npy"
+def _row_to_state(row: np.ndarray) -> tuple:
+    """Active pitch indices only — keeps state space tractable (avoids O(2^128))."""
+    return tuple(np.where(row > 0)[0])
+
+
+def _state_to_row(state: tuple, num_pitches: int = 128) -> np.ndarray:
+    row = np.zeros(num_pitches, dtype=np.float32)
+    if state:
+        row[list(state)] = 1.0
+    return row
+
+
+def train_markov_chain(dataset: str = "maestro"):
+    train_data_path = PROCESSED_DATA_DIR / f"{dataset}_train.npy"
     if not train_data_path.exists():
         print(f"Training data not found at {train_data_path}")
         return None
 
-    train_data = np.load(train_data_path)  # (N, 64, 128)
-    counts = defaultdict(lambda: defaultdict(int))
+    train_data = np.load(train_data_path)  # (N, seq_len, 128)
+    counts: defaultdict = defaultdict(lambda: defaultdict(int))
 
     print("Training Markov Chain...")
     for seq in train_data[:2000]:
         for t in range(len(seq) - 1):
-            counts[tuple(seq[t])][tuple(seq[t + 1])] += 1
+            counts[_row_to_state(seq[t])][_row_to_state(seq[t + 1])] += 1
 
-    # Normalize counts to probabilities
     transitions = {
         curr: {nxt: c / sum(d.values()) for nxt, c in d.items()}
         for curr, d in counts.items()
     }
     return transitions
 
+
 def generate_markov_music(transitions, num_steps=64, num_samples=5):
     if transitions is None:
         return
-        
+
     print("Generating Markov Baseline samples...")
     all_keys = list(transitions.keys())
-    
+
     for i in range(num_samples):
         curr = all_keys[np.random.randint(len(all_keys))]
-        roll_seq = [np.array(curr)]
-        
+        roll_seq = [_state_to_row(curr)]
+
         for _ in range(num_steps - 1):
             if curr in transitions:
                 options = list(transitions[curr].keys())
                 probs = list(transitions[curr].values())
-                # numpy choice expects options to be 1D array-like, but keys are tuples
-                idx = np.random.choice(len(options), p=probs)
-                curr = options[idx]
+                curr = options[np.random.choice(len(options), p=probs)]
             else:
                 curr = all_keys[np.random.randint(len(all_keys))]
-            roll_seq.append(np.array(curr))
-            
-        roll = np.stack(roll_seq).T # (128, 64)
+            roll_seq.append(_state_to_row(curr))
+
+        roll = np.stack(roll_seq).T  # (128, num_steps)
         pm = piano_roll_to_pretty_midi(roll, fs=FS)
         output_path = GENERATED_MIDI_DIR / f"baseline_markov_{i}.mid"
         pm.write(str(output_path))
@@ -129,12 +139,13 @@ if __name__ == "__main__":
     parser.add_argument("--num_samples", type=int, default=5)
     parser.add_argument("--max_new_tokens", type=int, default=512)
     parser.add_argument("--genre", type=str, default="maestro")
+    parser.add_argument("--dataset", type=str, default="maestro", help="Dataset for Markov baseline (e.g. maestro, lakh, groove)")
     args = parser.parse_args()
 
     if args.model == "baseline_random":
         generate_random_music(num_samples=args.num_samples)
     elif args.model == "baseline_markov":
-        transitions = train_markov_chain()
+        transitions = train_markov_chain(dataset=args.dataset)
         generate_markov_music(transitions, num_samples=args.num_samples)
     elif args.model == "ae":
         from src.generation.sample_latent import sample_ae

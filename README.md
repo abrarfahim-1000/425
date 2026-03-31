@@ -35,6 +35,9 @@ python src/training/train_vae.py --genres maestro --epochs 50
 
 # Task 3 — Transformer
 python src/training/train_transformer.py --genres maestro --epochs 50
+
+# Task 4 — RLHF
+python src/training/train_rlhf.py --rl_steps 30 --episodes_per_step 8 --genre maestro
 ```
 
 Checkpoints are saved to `checkpoints/`. Training curves are saved to `outputs/plots/`.
