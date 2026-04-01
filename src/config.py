@@ -31,7 +31,13 @@ for path in [PROCESSED_DATA_DIR, SPLIT_DATA_DIR, GENERATED_MIDI_DIR, PLOTS_DIR, 
 
 # Hardware Configuration
 # Native Intel support in PyTorch 2.9 (use 'xpu')
-DEVICE = "xpu" if hasattr(torch, "xpu") and torch.xpu.is_available() else "cpu"
+DEVICE = (
+    "xpu"
+    if hasattr(torch, "xpu") and torch.xpu.is_available()
+    else "cuda"
+    if torch.cuda.is_available()
+    else "cpu"
+)
 print(f"Using device: {DEVICE}")
 
 # Preprocessing Hyperparameters

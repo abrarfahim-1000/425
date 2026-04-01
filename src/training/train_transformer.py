@@ -362,7 +362,7 @@ def train_transformer(
         print(f"[TR] Missing {best_path}; skipping generation.")
         return
 
-    payload = torch.load(best_path, map_location=DEVICE)
+    payload = torch.load(best_path, map_location=DEVICE, weights_only=False)
     model.load_state_dict(payload["model_state_dict"])
 
     if genre_to_id:

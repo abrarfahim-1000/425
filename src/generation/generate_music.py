@@ -89,7 +89,7 @@ def generate_transformer_music(num_samples=10, max_new_tokens=512, genre="maestr
         print(f"Checkpoint not found at {checkpoint_path}")
         return
 
-    payload = torch.load(checkpoint_path, map_location=DEVICE)
+    payload = torch.load(checkpoint_path, map_location=DEVICE, weights_only=False)
     cfg = payload.get("config", {})
     genre_to_id = payload.get("genre_to_id", {"maestro": 0})
     vocab_size = int(payload.get("vocab_size", VOCAB_SIZE))

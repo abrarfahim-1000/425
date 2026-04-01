@@ -11,7 +11,17 @@ from tqdm import tqdm
 # Add src to path when run as a script.
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
-from src.config import FS, MAESTRO_CSV, MAESTRO_DIR, PROCESSED_DATA_DIR, SEQ_LEN
+from src.config import (
+    FS,
+    GROOVE_DIR,
+    MAESTRO_CSV,
+    MAESTRO_DIR,
+    PROCESSED_DATA_DIR,
+    RAW_DATA_DIR,
+    SEQ_LEN,
+    SEED,
+    TRAIN_VAL_TEST_SPLIT,
+)
 from src.preprocessing.piano_roll import midi_to_piano_roll, segment_piano_roll
 
 def load_midi(filepath: str) -> pretty_midi.PrettyMIDI | None:
@@ -79,5 +89,117 @@ def process_maestro_dataset(
         np.save(output_path, all_segments_np)
 
 
+def _process_generic_midi_dataset(
+    dataset_name: str,
+    dataset_root: Path,
+    output_dir: Path = PROCESSED_DATA_DIR,
+    fs: int = FS,
+    seq_len: int = SEQ_LEN,
+    split_ratio: tuple[float, float, float] = TRAIN_VAL_TEST_SPLIT,
+    seed: int = SEED,
+) -> None:
+    """
+    Processes recursively discovered MIDI files and writes split .npy files as:
+      {dataset_name}_train.npy, {dataset_name}_validation.npy, {dataset_name}_test.npy
+    """
+
+    midi_files = sorted(
+        list(dataset_root.rglob("*.mid"))
+        + list(dataset_root.rglob("*.midi"))
+    )
+    if not midi_files:
+        print(f"No MIDI files found under {dataset_root}")
+        return
+
+    print(f"Processing {len(midi_files)} MIDI files from {dataset_root} as '{dataset_name}'...")
+    all_segments = []
+    for midi_path in tqdm(midi_files):
+        midi = load_midi(str(midi_path))
+        if midi is None:
+            continue
+
+        roll = midi_to_piano_roll(midi, fs=fs)
+        segments = segment_piano_roll(roll, window=seq_len)
+        segments = [s.T.astype(np.uint8) for s in segments]
+        all_segments.extend(segments)
+
+    if not all_segments:
+        print(f"No valid segments found for dataset '{dataset_name}'.")
+        return
+
+    all_segments_np = np.stack(all_segments)
+    total = len(all_segments_np)
+
+    train_ratio, val_ratio, test_ratio = split_ratio
+    ratio_sum = train_ratio + val_ratio + test_ratio
+    if abs(ratio_sum - 1.0) > 1e-6:
+        raise ValueError(f"Split ratio must sum to 1.0, got {split_ratio}")
+
+    rng = np.random.default_rng(seed)
+    indices = rng.permutation(total)
+
+    train_end = int(total * train_ratio)
+    val_end = train_end + int(total * val_ratio)
+
+    split_indices = {
+        "train": indices[:train_end],
+        "validation": indices[train_end:val_end],
+        "test": indices[val_end:],
+    }
+
+    for split_name, idx in split_indices.items():
+        split_data = all_segments_np[idx]
+        out_path = output_dir / f"{dataset_name}_{split_name}.npy"
+        np.save(out_path, split_data)
+        print(f"Saved {len(split_data)} segments to {out_path} (shape: {split_data.shape})")
+
+
+def process_groove_dataset(
+    groove_root: Path = GROOVE_DIR,
+    output_dir: Path = PROCESSED_DATA_DIR,
+    fs: int = FS,
+    seq_len: int = SEQ_LEN,
+) -> None:
+    _process_generic_midi_dataset(
+        dataset_name="groove",
+        dataset_root=groove_root,
+        output_dir=output_dir,
+        fs=fs,
+        seq_len=seq_len,
+    )
+
+
+def process_lakh_dataset(
+    lakh_root: Path = RAW_DATA_DIR / "lakh",
+    output_dir: Path = PROCESSED_DATA_DIR,
+    fs: int = FS,
+    seq_len: int = SEQ_LEN,
+) -> None:
+    _process_generic_midi_dataset(
+        dataset_name="lakh",
+        dataset_root=lakh_root,
+        output_dir=output_dir,
+        fs=fs,
+        seq_len=seq_len,
+    )
+
+
 if __name__ == "__main__":
-    process_maestro_dataset()
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="maestro",
+        choices=["maestro", "groove", "lakh", "all"],
+        help="Dataset to preprocess.",
+    )
+    args = parser.parse_args()
+
+    if args.dataset in {"maestro", "all"}:
+        process_maestro_dataset()
+    if args.dataset in {"groove", "all"}:
+        process_groove_dataset()
+    if args.dataset in {"lakh", "all"}:
+        process_lakh_dataset()

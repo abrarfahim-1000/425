@@ -1,7 +1,7 @@
 # Unsupervised Neural Network for Multi-Genre Music Generation
 **CSE425 / EEE474 — Spring 2026**
 
-This project builds four progressively complex unsupervised generative models for MIDI music using the MAESTRO dataset.
+This project builds four progressively complex unsupervised generative models for MIDI music.
 
 ---
 
@@ -12,14 +12,32 @@ This project builds four progressively complex unsupervised generative models fo
 pip install -r requirements.txt
 ```
 
-### 2. Download MAESTRO dataset
+### 2. Download datasets
+
+#### MAESTRO (required)
 Download from https://magenta.tensorflow.org/datasets/maestro and extract to `data/raw_midi/maestro/`.
+
+#### Groove MIDI (optional for Task 2 multi-genre)
+Download from https://magenta.tensorflow.org/datasets/groove and extract to `data/raw_midi/groove/`.
+
+#### Lakh MIDI (optional for Task 2 multi-genre)
+Download Lakh MIDI and extract cleaned MIDI files to `data/raw_midi/lakh/`.
 
 ### 3. Run preprocessing
 ```bash
-python src/preprocessing/midi_parser.py
+# MAESTRO only
+python src/preprocessing/midi_parser.py --dataset maestro
+
+# Groove only
+python src/preprocessing/midi_parser.py --dataset groove
+
+# Lakh only
+python src/preprocessing/midi_parser.py --dataset lakh
+
+# Process every supported dataset found under data/raw_midi/
+python src/preprocessing/midi_parser.py --dataset all
 ```
-This writes `maestro_train.npy`, `maestro_validation.npy`, `maestro_test.npy` to `data/processed/`.  
+This writes split files like `{genre}_train.npy`, `{genre}_validation.npy`, `{genre}_test.npy` to `data/processed/`.  
 Alternatively, open `notebooks/preprocessing.ipynb` for a step-by-step walkthrough.
 
 ---
@@ -30,11 +48,15 @@ Alternatively, open `notebooks/preprocessing.ipynb` for a step-by-step walkthrou
 # Task 1 — LSTM Autoencoder
 python src/training/train_ae.py
 
-# Task 2 — VAE
+# Task 2 — VAE (single genre)
 python src/training/train_vae.py --genres maestro --epochs 50
 
-# Task 3 — Transformer
+# Task 2 — VAE (multi-genre)
+python src/training/train_vae.py --genres maestro,groove,lakh --epochs 50
+
+# Task 3 — Transformer (single or multi-genre)
 python src/training/train_transformer.py --genres maestro --epochs 50
+python src/training/train_transformer.py --genres maestro,groove,lakh --epochs 50
 
 # Task 4 — RLHF
 python src/training/train_rlhf.py --rl_steps 30 --episodes_per_step 8 --genre maestro
@@ -67,9 +89,18 @@ Generated MIDI files are saved to `outputs/generated_midis/`.
 
 ```bash
 python src/evaluation/metrics.py
+
+# Compare all models (baselines + Tasks 1-4)
+python src/evaluation/metrics.py --all
+
+# Compare RLHF before-vs-after outputs
+python src/evaluation/metrics.py --compare_rlhf
 ```
 
-Computes pitch histogram similarity, rhythm diversity, and repetition ratio for all generated MIDI files and saves a CSV report to `outputs/generated_midis/evaluation_results.csv`.
+Computes pitch histogram similarity, rhythm diversity, and repetition ratio for generated MIDI files and saves reports including:
+- `outputs/generated_midis/evaluation_results.csv`
+- `outputs/generated_midis/all_models_comparison.csv`
+- `outputs/survey_results/task4_comparison.csv`
 
 ---
 
@@ -85,7 +116,7 @@ Computes pitch histogram similarity, rhythm diversity, and repetition ratio for 
 ├── src/
 │   ├── config.py
 │   ├── preprocessing/      # midi_parser, piano_roll, tokenizer
-│   ├── models/             # autoencoder, vae, transformer
+│   ├── models/             # autoencoder, vae, transformer, diffusion (placeholder)
 │   ├── training/           # train_ae, train_vae, train_transformer
 │   ├── evaluation/         # metrics, pitch_histogram, rhythm_score
 │   └── generation/         # sample_latent, generate_music, midi_export
@@ -100,3 +131,9 @@ Computes pitch histogram similarity, rhythm diversity, and repetition ratio for 
 ## Hardware Note
 
 Tested on AMD Ryzen 5 7500F + Intel Arc B580 (12 GB VRAM). PyTorch 2.x supports the Arc GPU natively via the `xpu` backend. The device is auto-detected in `src/config.py`.
+
+---
+
+## Notes
+
+- `src/models/diffusion.py` is intentionally a placeholder and not part of the core four required tasks.

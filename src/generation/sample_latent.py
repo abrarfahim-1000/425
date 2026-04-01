@@ -60,7 +60,7 @@ def sample_ae(num_samples=5):
         print(f"Checkpoint not found at {checkpoint_path}")
         return
 
-    model.load_state_dict(torch.load(checkpoint_path, map_location=DEVICE))
+    model.load_state_dict(torch.load(checkpoint_path, map_location=DEVICE, weights_only=True))
     model.eval()
 
     # Sample from the empirical latent distribution (not N(0,1)).
@@ -99,7 +99,7 @@ def sample_vae(num_samples: int = 8):
         print(f"Checkpoint not found at {checkpoint_path}")
         return
 
-    model.load_state_dict(torch.load(checkpoint_path, map_location=DEVICE))
+    model.load_state_dict(torch.load(checkpoint_path, map_location=DEVICE, weights_only=True))
     model.eval()
 
     print(f"Generating {num_samples} samples from VAE latent space...")

@@ -71,7 +71,7 @@ def load_transformer_checkpoint(checkpoint_path: Path):
     if not checkpoint_path.exists():
         raise FileNotFoundError(f"Task 3 checkpoint missing: {checkpoint_path}")
 
-    payload = torch.load(checkpoint_path, map_location=DEVICE)
+    payload = torch.load(checkpoint_path, map_location=DEVICE, weights_only=False)
     cfg = payload.get("config", {})
     genre_to_id = payload.get("genre_to_id", {"maestro": 0})
 
@@ -384,7 +384,7 @@ def train_rlhf(
     # Load best tuned model for after-RLHF generation.
     tuned_ckpt_path = CHECKPOINT_DIR / "best_rlhf_transformer.pt"
     if tuned_ckpt_path.exists():
-        tuned = torch.load(tuned_ckpt_path, map_location=DEVICE)
+        tuned = torch.load(tuned_ckpt_path, map_location=DEVICE, weights_only=False)
         model.load_state_dict(tuned["model_state_dict"])
 
     model.eval()

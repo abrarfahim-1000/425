@@ -70,7 +70,8 @@ class MusicTransformer(nn.Module):
 
         if genre_ids is None:
             genre_ids = torch.zeros(batch_size, dtype=torch.long, device=tokens.device)
-        genre_cond = self.genre_embedding(genre_ids).unsqueeze(1)  # (batch, 1, d_model)
+        # Equivalent to h_t = Emb(x_t) + Emb(genre) at every time step.
+        genre_cond = self.genre_embedding(genre_ids).unsqueeze(1).expand(-1, seq_len, -1)
         x = x + genre_cond
 
         x = self.dropout(x)

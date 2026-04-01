@@ -267,7 +267,7 @@ def train_vae(
         print(f"[VAE] Best checkpoint not found at {best_path}, skipping generation.")
         return
 
-    model.load_state_dict(torch.load(best_path, map_location=DEVICE))
+    model.load_state_dict(torch.load(best_path, map_location=DEVICE, weights_only=True))
 
     # Generate Task 2 samples + interpolation
     generate_vae_midi_samples(
